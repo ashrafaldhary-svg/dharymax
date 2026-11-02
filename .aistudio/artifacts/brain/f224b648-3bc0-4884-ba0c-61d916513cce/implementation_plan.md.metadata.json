@@ -1,6 +1,6 @@
 {
-  "summary":  "خطة التنفيذ التفصيلية لتطبيق ذاري ماكس (Dhari Max) لتحميل وإدارة الفيديو والصوتيات لنظام أندرويد باستخدام Jetpack Compose و Room و MediaStore.",
-  "updatedAt":  "2026-11-01T18:45:33.631124976Z",
-  "requestFeedback":  true,
-  "userFacing":  true
+  "summary": "خطة التنفيذ المحدثة وفق المتطلبات الإضافية: واجهة MediaExtractorProvider الموحدة، فحص الخوادم الديناميكي، دعم MediaMuxer لدمج الصوت والفيديو، التحقق الثلاثي بـ Magic Bytes و MediaExtractor، واستكمال Range الآمن مع HTTP 206.",
+  "updatedAt": "2026-11-02T13:49:07.227669429Z",
+  "requestFeedback": true,
+  "userFacing": true
 }

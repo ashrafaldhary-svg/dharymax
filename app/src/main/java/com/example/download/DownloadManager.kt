@@ -6,21 +6,18 @@ import com.example.data.local.DownloadRepository
 import com.example.data.model.DownloadStatus
 import com.example.data.model.DownloadTask
 import com.example.data.model.MediaType
+import com.example.engine.MediaValidator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.io.File
-import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.RandomAccessFile
 import java.util.concurrent.ConcurrentHashMap
@@ -135,8 +132,8 @@ class DownloadManager(
     }
 
     private suspend fun executeDownload(task: DownloadTask) {
-        var tempFile = storageManager.getTempDownloadFile(task.id, task.format)
-        val existingBytes = if (tempFile.exists()) tempFile.length() else 0L
+        val tempFile = storageManager.getTempDownloadFile(task.id, task.format)
+        var existingBytes = if (tempFile.exists()) tempFile.length() else 0L
 
         repository.updateProgress(
             id = task.id,
@@ -157,6 +154,8 @@ class DownloadManager(
             }
 
             val response = httpClient.newCall(requestBuilder.build()).execute()
+
+            // 1. Check HTTP Status
             if (!response.isSuccessful && response.code != 206) {
                 // If 416 (Range not satisfiable), restart from 0
                 if (response.code == 416) {
@@ -167,25 +166,47 @@ class DownloadManager(
                 throw IllegalStateException("استجابة الخادم غير ناجحة: كود ${response.code}")
             }
 
-            val body = response.body ?: throw IllegalStateException("جسم الاستجابة فارغ")
+            // 2. Strict Content-Type Validation (Level 1)
+            val contentType = response.header("Content-Type")
+            val ctValidation = MediaValidator.validateContentType(contentType)
+            if (ctValidation is MediaValidator.ValidationResult.Invalid) {
+                throw IllegalStateException(ctValidation.reason)
+            }
+
+            val body = response.body ?: throw IllegalStateException("جسم الاستجابة فارغ من الخادم.")
             val contentLength = body.contentLength()
-            val totalBytes = if (existingBytes > 0 && contentLength > 0) {
-                existingBytes + contentLength
-            } else if (contentLength > 0) {
-                contentLength
+
+            val randomAccessFile = RandomAccessFile(tempFile, "rw")
+
+            // 3. Safe Range & Resumption Logic (HTTP 206 vs HTTP 200)
+            val currentBytes: Long
+            val totalBytes: Long
+
+            if (existingBytes > 0L) {
+                if (response.code == 206) {
+                    // Server honored partial content request
+                    randomAccessFile.seek(existingBytes)
+                    currentBytes = existingBytes
+                    totalBytes = if (contentLength > 0) existingBytes + contentLength else task.totalBytes
+                } else {
+                    // Server returned 200 OK: ignored Range header! Truncate to avoid duplicate corrupt bytes
+                    Log.w("DownloadManager", "Server returned 200 instead of 206 for range request. Rewriting from 0.")
+                    randomAccessFile.setLength(0)
+                    randomAccessFile.seek(0)
+                    currentBytes = 0L
+                    existingBytes = 0L
+                    totalBytes = if (contentLength > 0) contentLength else task.totalBytes
+                }
             } else {
-                task.totalBytes
+                randomAccessFile.seek(0)
+                currentBytes = 0L
+                totalBytes = if (contentLength > 0) contentLength else task.totalBytes
             }
 
             val inputStream: InputStream = body.byteStream()
-            val randomAccessFile = RandomAccessFile(tempFile, "rw")
-            if (existingBytes > 0) {
-                randomAccessFile.seek(existingBytes)
-            }
-
             val buffer = ByteArray(64 * 1024) // 64 KB chunk
             var read: Int
-            var currentBytes = existingBytes
+            var bytesWritten = currentBytes
             var lastUpdateTime = System.currentTimeMillis()
             var bytesSinceLastUpdate = 0L
 
@@ -193,20 +214,20 @@ class DownloadManager(
                 randomAccessFile.use { raf ->
                     while (stream.read(buffer).also { read = it } != -1) {
                         raf.write(buffer, 0, read)
-                        currentBytes += read
+                        bytesWritten += read
                         bytesSinceLastUpdate += read
 
                         val now = System.currentTimeMillis()
                         val diff = now - lastUpdateTime
-                        if (diff >= 350) { // Update database every 350ms to keep smooth UI without overwhelming Room
+                        if (diff >= 350) { // Update database every 350ms to keep smooth UI
                             val speed = (bytesSinceLastUpdate * 1000L) / diff.coerceAtLeast(1L)
-                            val remainingBytes = (totalBytes - currentBytes).coerceAtLeast(0L)
+                            val remainingBytes = (totalBytes - bytesWritten).coerceAtLeast(0L)
                             val eta = if (speed > 0) remainingBytes / speed else 0L
 
                             repository.updateProgress(
                                 id = task.id,
                                 status = DownloadStatus.DOWNLOADING.name,
-                                downloadedBytes = currentBytes,
+                                downloadedBytes = bytesWritten,
                                 totalBytes = totalBytes,
                                 speed = speed,
                                 eta = eta
@@ -219,9 +240,27 @@ class DownloadManager(
                 }
             }
 
-            // Finished download stream -> Move to MediaStore
+            // 4. Finished byte stream -> Perform Deep Triple-Tier Integrity Verification
             activeJobs.remove(task.id)
 
+            // Minimum length check (must be at least 50KB for valid media)
+            if (tempFile.length() < 50_000L && totalBytes > 100_000L) {
+                throw IllegalStateException("انقطع الاتصال بالخادم قبل اكتمال ملف الوسائط (${tempFile.length()} بايت فقط).")
+            }
+
+            // Level 2: Magic Bytes verification
+            val magicValidation = MediaValidator.validateMagicBytes(tempFile, task.format)
+            if (magicValidation is MediaValidator.ValidationResult.Invalid) {
+                throw IllegalStateException(magicValidation.reason)
+            }
+
+            // Level 3: Android native MediaExtractor verification
+            val extractorValidation = MediaValidator.validateWithAndroidMediaExtractor(context, tempFile)
+            if (extractorValidation is MediaValidator.ValidationResult.Invalid) {
+                throw IllegalStateException(extractorValidation.reason)
+            }
+
+            // All checks passed -> Move to MediaStore
             val mType = if (task.mediaType == MediaType.AUDIO.name) MediaType.AUDIO else MediaType.VIDEO
             val saveResult = storageManager.saveToMediaStore(
                 tempFile = tempFile,
@@ -239,12 +278,14 @@ class DownloadManager(
             )
 
         } catch (e: CancellationException) {
-            // Download was intentionally paused or cancelled by user
             Log.d("DownloadManager", "Task ${task.id} paused/cancelled")
         } catch (e: Exception) {
-            Log.e("DownloadManager", "Task ${task.id} failed", e)
+            Log.e("DownloadManager", "Task ${task.id} failed: ${e.message}", e)
             activeJobs.remove(task.id)
             val errorMsg = when {
+                e.message?.contains("HTML", true) == true -> "الرابط ليس ملف وسائط صالح (صفحة ويب)"
+                e.message?.contains("ftyp", true) == true -> "ملف الفيديو تالف أو غير صالح"
+                e.message?.contains("ID3", true) == true -> "ملف الصوت تالف أو غير صالح"
                 e.message?.contains("Unable to resolve host", true) == true -> "لا يوجد اتصال بالإنترنت"
                 e.message?.contains("timeout", true) == true -> "انتهت مهلة الاتصال بالخادم"
                 else -> e.localizedMessage ?: "حدث خطأ غير متوقع أثناء التحميل"
