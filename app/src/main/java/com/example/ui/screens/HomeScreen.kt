@@ -137,7 +137,7 @@ fun HomeScreen(
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
                                 Text(
-                                    text = "ذاري ماكس – Dhari Max",
+                                    text = "المحمل – Al-Muhammil",
                                     style = MaterialTheme.typography.titleLarge,
                                     fontWeight = FontWeight.ExtraBold,
                                     color = TextPrimary

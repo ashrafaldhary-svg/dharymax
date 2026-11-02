@@ -1,6 +1,6 @@
 {
-  "name": "Dhari Max",
-  "description": "تطبيق ذاري ماكس (Dhari Max) لإدارة وتحميل الفيديوهات ومسارات الصوتيات بجودات متعددة وحفظها في مجلدات النظام.",
+  "name": "المحمل",
+  "description": "تطبيق المحمل لإدارة وتحميل الفيديوهات ومسارات الصوتيات بجودات متعددة وحفظها في مجلدات النظام.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

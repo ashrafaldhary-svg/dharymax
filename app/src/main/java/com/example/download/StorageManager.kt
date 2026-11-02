@@ -33,6 +33,8 @@ data class SavedMediaFile(
 class StorageManager(private val context: Context) {
 
     companion object {
+        const val FOLDER_MOVIES_ALMUHAMMIL = "Movies/المحمل"
+        const val FOLDER_MUSIC_ALMUHAMMIL = "Music/المحمل"
         const val FOLDER_MOVIES_DHARI = "Movies/Dhari Max"
         const val FOLDER_MUSIC_DHARI = "Music/Dhari Max"
 
@@ -117,7 +119,7 @@ class StorageManager(private val context: Context) {
                     MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
                 }
 
-                val relativePath = if (mediaType == MediaType.AUDIO) FOLDER_MUSIC_DHARI else FOLDER_MOVIES_DHARI
+                val relativePath = if (mediaType == MediaType.AUDIO) FOLDER_MUSIC_ALMUHAMMIL else FOLDER_MOVIES_ALMUHAMMIL
 
                 val contentValues = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
@@ -145,9 +147,9 @@ class StorageManager(private val context: Context) {
             } else {
                 // Legacy storage for older devices
                 val targetDir = if (mediaType == MediaType.AUDIO) {
-                    File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "Dhari Max")
+                    File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "المحمل")
                 } else {
-                    File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "Dhari Max")
+                    File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "المحمل")
                 }
                 if (!targetDir.exists()) targetDir.mkdirs()
 
@@ -161,7 +163,7 @@ class StorageManager(private val context: Context) {
             // Fallback: save to external files dir if MediaStore fails
             try {
                 val fallbackDir = context.getExternalFilesDir(if (mediaType == MediaType.AUDIO) Environment.DIRECTORY_MUSIC else Environment.DIRECTORY_MOVIES)
-                val fallbackFile = File(fallbackDir, "DhariMax_${System.currentTimeMillis()}.$format")
+                val fallbackFile = File(fallbackDir, "AlMuhammil_${System.currentTimeMillis()}.$format")
                 tempFile.copyTo(fallbackFile, overwrite = true)
                 tempFile.delete()
                 Result.success(fallbackFile.absolutePath)
@@ -209,8 +211,8 @@ class StorageManager(private val context: Context) {
                     MediaStore.Video.Media.SIZE,
                     MediaStore.Video.Media.DATE_MODIFIED
                 )
-                val videoSelection = "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?"
-                val videoArgs = arrayOf("%Dhari Max%")
+                val videoSelection = "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ? OR ${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?"
+                val videoArgs = arrayOf("%المحمل%", "%Dhari Max%")
 
                 context.contentResolver.query(
                     MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
@@ -252,8 +254,8 @@ class StorageManager(private val context: Context) {
                     MediaStore.Audio.Media.SIZE,
                     MediaStore.Audio.Media.DATE_MODIFIED
                 )
-                val audioSelection = "${MediaStore.Audio.Media.RELATIVE_PATH} LIKE ?"
-                val audioArgs = arrayOf("%Dhari Max%")
+                val audioSelection = "${MediaStore.Audio.Media.RELATIVE_PATH} LIKE ? OR ${MediaStore.Audio.Media.RELATIVE_PATH} LIKE ?"
+                val audioArgs = arrayOf("%المحمل%", "%Dhari Max%")
 
                 context.contentResolver.query(
                     MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
@@ -331,10 +333,10 @@ class StorageManager(private val context: Context) {
             val intent = Intent(Intent.ACTION_SEND).apply {
                 type = mime
                 putExtra(Intent.EXTRA_STREAM, uri)
-                putExtra(Intent.EXTRA_TEXT, "تم التحميل عبر تطبيق ذاري ماكس: $title")
+                putExtra(Intent.EXTRA_TEXT, "تم التحميل عبر تطبيق المحمل: $title")
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            val chooser = Intent.createChooser(intent, "مشاركة الوسائط عبر ذاري ماكس").apply {
+            val chooser = Intent.createChooser(intent, "مشاركة الوسائط عبر المحمل").apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(chooser)
@@ -348,13 +350,43 @@ class StorageManager(private val context: Context) {
         try {
             if (filePathOrUri.startsWith("content://")) {
                 val uri = Uri.parse(filePathOrUri)
-                context.contentResolver.delete(uri, null, null) > 0
+                val rows = context.contentResolver.delete(uri, null, null)
+                rows > 0
             } else {
                 val file = File(filePathOrUri)
-                if (file.exists()) file.delete() else false
+                if (file.exists()) {
+                    file.delete()
+                } else false
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             false
+        }
+    }
+
+    /**
+     * Open downloads directory using system file manager
+     */
+    fun openDownloadsFolder() {
+        try {
+            val moviesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
+            val targetDir = File(moviesDir, "المحمل").takeIf { it.exists() } ?: moviesDir
+            val uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", targetDir)
+            } else {
+                Uri.fromFile(targetDir)
+            }
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "resource/folder")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        } catch (_: Exception) {
+            try {
+                val fallbackIntent = Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(fallbackIntent)
+            } catch (_: Exception) {}
         }
     }
 }

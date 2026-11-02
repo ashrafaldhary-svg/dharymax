@@ -255,12 +255,12 @@ fun SettingsScreen(
                 }
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "• الفيديوهات: Movies/Dhari Max (MediaStore)",
+                    text = "• الفيديوهات: Movies/المحمل (MediaStore)",
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondary
                 )
                 Text(
-                    text = "• الصوتيات: Music/Dhari Max (MediaStore)",
+                    text = "• الصوتيات: Music/المحمل (MediaStore)",
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondary
                 )
@@ -301,7 +301,7 @@ fun SettingsScreen(
             colors = CardDefaults.cardColors(containerColor = SurfaceDark)
         ) {
             Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(text = "ذاري ماكس – Dhari Max", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = CrimsonNeon)
+                Text(text = "المحمل – Al-Muhammil", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = CrimsonNeon)
                 Text(text = "الإصدار 1.0.0 • بنية MVVM و Room و MediaStore", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(text = "تم التطوير وفق أعلى معايير أداء أندرويد وتجربة المستخدم RTL", style = MaterialTheme.typography.labelSmall, color = TextSecondary)

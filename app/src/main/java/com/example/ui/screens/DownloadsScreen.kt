@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Audiotrack
@@ -26,6 +27,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Pause
@@ -85,7 +87,8 @@ fun DownloadsScreen(
     onDelete: (String) -> Unit,
     onOpenFile: (DownloadTask) -> Unit,
     onShareFile: (DownloadTask) -> Unit,
-    onClearCompleted: () -> Unit
+    onClearCompleted: () -> Unit,
+    onOpenFolder: () -> Unit = {}
 ) {
     val filteredTasks = remember(tasks, selectedFilter) {
         when (selectedFilter) {
@@ -118,16 +121,45 @@ fun DownloadsScreen(
                 color = TextPrimary
             )
 
-            if (tasks.any { it.status == DownloadStatus.COMPLETED.name }) {
-                IconButton(
-                    onClick = onClearCompleted,
-                    modifier = Modifier.testTag("clear_completed_button")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Button to open downloads folder
+                Button(
+                    onClick = onOpenFolder,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = SurfaceDark,
+                        contentColor = CrimsonNeon
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier.testTag("open_folder_button")
                 ) {
                     Icon(
-                        imageVector = Icons.Default.DeleteSweep,
-                        contentDescription = "مسح المكتملة",
-                        tint = TextSecondary
+                        imageVector = Icons.Default.FolderOpen,
+                        contentDescription = "فتح المجلد",
+                        tint = CrimsonNeon,
+                        modifier = Modifier.size(18.dp)
                     )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "فتح المجلد",
+                        color = TextPrimary,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                if (tasks.any { it.status == DownloadStatus.COMPLETED.name }) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    IconButton(
+                        onClick = onClearCompleted,
+                        modifier = Modifier.testTag("clear_completed_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DeleteSweep,
+                            contentDescription = "مسح المكتملة",
+                            tint = TextSecondary
+                        )
+                    }
                 }
             }
         }

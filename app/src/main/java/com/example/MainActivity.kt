@@ -291,7 +291,11 @@ fun DhariMaxApp(viewModel: DhariMaxViewModel) {
                             onShareFile = { task ->
                                 viewModel.storageManager.shareFile(task.localFilePath, task.mediaType == "AUDIO", task.title)
                             },
-                            onClearCompleted = viewModel::clearCompletedTasks
+                            onClearCompleted = viewModel::clearCompletedTasks,
+                            onOpenFolder = {
+                                viewModel.storageManager.openDownloadsFolder()
+                                viewModel.switchTab(AppNavTab.FILES)
+                            }
                         )
                     }
 
