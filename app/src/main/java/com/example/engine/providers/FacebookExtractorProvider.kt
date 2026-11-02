@@ -77,9 +77,9 @@ class FacebookExtractorProvider(
                         id = "fb_sample_720",
                         label = "720p HD دفق بديل عالي الدقة",
                         resolution = "1280x720",
-                        approximateSizeBytes = 22_000_000L,
+                        approximateSizeBytes = 4_999_379L,
                         format = "mp4",
-                        streamUrl = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4"
+                        streamUrl = "https://test-videos.co.uk/vids/jellyfish/mp4/h264/720/Jellyfish_720_10s_5MB.mp4"
                     )
                 )
                 qualities.add(
@@ -87,9 +87,9 @@ class FacebookExtractorProvider(
                         id = "fb_sample_audio",
                         label = "صوت MP3 عالي النقاء",
                         resolution = "Audio",
-                        approximateSizeBytes = 3_800_000L,
+                        approximateSizeBytes = 7_100_000L,
                         format = "mp3",
-                        streamUrl = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3",
+                        streamUrl = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3",
                         isAudioOnly = true
                     )
                 )
