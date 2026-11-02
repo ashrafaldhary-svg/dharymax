@@ -14,14 +14,80 @@ object MediaMuxerHelper {
 
     private const val TAG = "MediaMuxerHelper"
 
+    class IncompatibleCodecException(message: String) : Exception(message)
+
     /**
-     * Mux separate video-only MP4 file and audio-only M4A/AAC file into a single output MP4
+     * Checks if the video and audio tracks are compatible with Android's MediaMuxer MP4 container.
+     * MP4 container in Android MediaMuxer natively supports:
+     * - Video: H.264 (video/avc), H.265 (video/hevc), MPEG-4 (video/mp4v-es)
+     * - Audio: AAC (audio/mp4a-latm)
+     */
+    fun checkMuxerCompatibility(videoFile: File, audioFile: File): Pair<Boolean, String> {
+        val videoExtractor = MediaExtractor()
+        val audioExtractor = MediaExtractor()
+
+        try {
+            videoExtractor.setDataSource(videoFile.absolutePath)
+            audioExtractor.setDataSource(audioFile.absolutePath)
+
+            var videoMime = ""
+            for (i in 0 until videoExtractor.trackCount) {
+                val format = videoExtractor.getTrackFormat(i)
+                val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
+                if (mime.startsWith("video/")) {
+                    videoMime = mime
+                    break
+                }
+            }
+
+            var audioMime = ""
+            for (i in 0 until audioExtractor.trackCount) {
+                val format = audioExtractor.getTrackFormat(i)
+                val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
+                if (mime.startsWith("audio/")) {
+                    audioMime = mime
+                    break
+                }
+            }
+
+            val isVideoCompatible = videoMime == MediaFormat.MIMETYPE_VIDEO_AVC ||
+                    videoMime == MediaFormat.MIMETYPE_VIDEO_HEVC ||
+                    videoMime.contains("mp4v")
+
+            val isAudioCompatible = audioMime == MediaFormat.MIMETYPE_AUDIO_AAC ||
+                    audioMime.contains("mp4a")
+
+            if (!isVideoCompatible) {
+                return false to "ترميز الفيديو ($videoMime) غير مدعوم للدمج المباشر في حاوية MP4 (يتطلب H.264 أو H.265)."
+            }
+
+            if (!isAudioCompatible) {
+                return false to "ترميز الصوت ($audioMime) غير مدعوم للدمج المباشر في حاوية MP4 (يتطلب AAC/M4A)."
+            }
+
+            return true to "الترميزات متوافقة تماماً مع مشغل وحاوية أندرويد."
+        } catch (e: Exception) {
+            return false to "تعذر قراءة مسارات الوسائط: ${e.message}"
+        } finally {
+            try { videoExtractor.release() } catch (_: Exception) {}
+            try { audioExtractor.release() } catch (_: Exception) {}
+        }
+    }
+
+    /**
+     * Safely mux separate video-only MP4 file and audio-only M4A file with pre-check
      */
     suspend fun muxVideoAndAudio(
         videoFile: File,
         audioFile: File,
         outputFile: File
     ): Result<File> = withContext(Dispatchers.IO) {
+        val (isCompatible, reason) = checkMuxerCompatibility(videoFile, audioFile)
+        if (!isCompatible) {
+            Log.w(TAG, "Muxing rejected due to codec incompatibility: $reason")
+            return@withContext Result.failure(IncompatibleCodecException(reason))
+        }
+
         val videoExtractor = MediaExtractor()
         val audioExtractor = MediaExtractor()
         var muxer: MediaMuxer? = null
@@ -30,7 +96,7 @@ object MediaMuxerHelper {
             videoExtractor.setDataSource(videoFile.absolutePath)
             audioExtractor.setDataSource(audioFile.absolutePath)
 
-            // Find video track
+            // Select video track
             var videoTrackIndex = -1
             var videoFormat: MediaFormat? = null
             for (i in 0 until videoExtractor.trackCount) {
@@ -43,7 +109,7 @@ object MediaMuxerHelper {
                 }
             }
 
-            // Find audio track
+            // Select audio track
             var audioTrackIndex = -1
             var audioFormat: MediaFormat? = null
             for (i in 0 until audioExtractor.trackCount) {
@@ -56,12 +122,8 @@ object MediaMuxerHelper {
                 }
             }
 
-            if (videoTrackIndex == -1 || videoFormat == null) {
-                return@withContext Result.failure(IllegalStateException("لم يتم العثور على مسار فيديو صالح للدمج."))
-            }
-
-            if (audioTrackIndex == -1 || audioFormat == null) {
-                return@withContext Result.failure(IllegalStateException("لم يتم العثور على مسار صوتي صالح للدمج."))
+            if (videoTrackIndex == -1 || videoFormat == null || audioTrackIndex == -1 || audioFormat == null) {
+                return@withContext Result.failure(IllegalStateException("المسارات غير صالحة للدمج."))
             }
 
             if (outputFile.exists()) outputFile.delete()
@@ -71,7 +133,6 @@ object MediaMuxerHelper {
             val muxerAudioTrack = muxer.addTrack(audioFormat)
             muxer.start()
 
-            // Buffer for samples
             val maxBufferSize = 1024 * 1024 // 1 MB
             val buffer = ByteBuffer.allocate(maxBufferSize)
             val bufferInfo = MediaCodec.BufferInfo()
@@ -113,15 +174,9 @@ object MediaMuxerHelper {
             Log.e(TAG, "Muxing failed: ${e.message}", e)
             Result.failure(e)
         } finally {
-            try {
-                videoExtractor.release()
-            } catch (_: Exception) {}
-            try {
-                audioExtractor.release()
-            } catch (_: Exception) {}
-            try {
-                muxer?.release()
-            } catch (_: Exception) {}
+            try { videoExtractor.release() } catch (_: Exception) {}
+            try { audioExtractor.release() } catch (_: Exception) {}
+            try { muxer?.release() } catch (_: Exception) {}
         }
     }
 }

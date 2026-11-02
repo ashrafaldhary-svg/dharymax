@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import java.io.InputStream
 import java.io.RandomAccessFile
 import java.util.concurrent.ConcurrentHashMap
@@ -33,7 +34,8 @@ class DownloadManager(
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(35, TimeUnit.SECONDS)
+        .followRedirects(true)
         .build()
 
     private val _concurrentLimit = MutableStateFlow(2)
@@ -145,31 +147,33 @@ class DownloadManager(
         )
 
         try {
-            val requestBuilder = Request.Builder()
-                .url(task.downloadUrl)
-                .header("User-Agent", "Mozilla/5.0 (Linux; Android 14; Mobile) DhariMax/1.0")
+            var response: Response = executeHttpRequest(task.downloadUrl, existingBytes)
 
-            if (existingBytes > 0L) {
-                requestBuilder.header("Range", "bytes=$existingBytes-")
+            // If 403 or 401, retry with Android YouTube client headers
+            if (response.code == 403 || response.code == 401) {
+                response.close()
+                response = executeHttpRequestWithAndroidHeaders(task.downloadUrl, existingBytes)
             }
-
-            val response = httpClient.newCall(requestBuilder.build()).execute()
 
             // 1. Check HTTP Status
             if (!response.isSuccessful && response.code != 206) {
                 // If 416 (Range not satisfiable), restart from 0
                 if (response.code == 416) {
+                    response.close()
                     tempFile.delete()
                     executeDownload(task.copy(downloadedBytes = 0L))
                     return
                 }
-                throw IllegalStateException("استجابة الخادم غير ناجحة: كود ${response.code}")
+                val code = response.code
+                response.close()
+                throw IllegalStateException("استجابة الخادم غير ناجحة: كود $code")
             }
 
             // 2. Strict Content-Type Validation (Level 1)
             val contentType = response.header("Content-Type")
             val ctValidation = MediaValidator.validateContentType(contentType)
             if (ctValidation is MediaValidator.ValidationResult.Invalid) {
+                response.close()
                 throw IllegalStateException(ctValidation.reason)
             }
 
@@ -184,13 +188,11 @@ class DownloadManager(
 
             if (existingBytes > 0L) {
                 if (response.code == 206) {
-                    // Server honored partial content request
                     randomAccessFile.seek(existingBytes)
                     currentBytes = existingBytes
                     totalBytes = if (contentLength > 0) existingBytes + contentLength else task.totalBytes
                 } else {
-                    // Server returned 200 OK: ignored Range header! Truncate to avoid duplicate corrupt bytes
-                    Log.w("DownloadManager", "Server returned 200 instead of 206 for range request. Rewriting from 0.")
+                    Log.w("DownloadManager", "Server returned 200 instead of 206. Truncating to byte 0.")
                     randomAccessFile.setLength(0)
                     randomAccessFile.seek(0)
                     currentBytes = 0L
@@ -219,7 +221,7 @@ class DownloadManager(
 
                         val now = System.currentTimeMillis()
                         val diff = now - lastUpdateTime
-                        if (diff >= 350) { // Update database every 350ms to keep smooth UI
+                        if (diff >= 350) {
                             val speed = (bytesSinceLastUpdate * 1000L) / diff.coerceAtLeast(1L)
                             val remainingBytes = (totalBytes - bytesWritten).coerceAtLeast(0L)
                             val eta = if (speed > 0) remainingBytes / speed else 0L
@@ -240,11 +242,11 @@ class DownloadManager(
                 }
             }
 
-            // 4. Finished byte stream -> Perform Deep Triple-Tier Integrity Verification
+            // 4. Verification before marking as COMPLETED
             activeJobs.remove(task.id)
 
-            // Minimum length check (must be at least 50KB for valid media)
-            if (tempFile.length() < 50_000L && totalBytes > 100_000L) {
+            // Minimum length check
+            if (tempFile.length() < 30_000L && totalBytes > 80_000L) {
                 throw IllegalStateException("انقطع الاتصال بالخادم قبل اكتمال ملف الوسائط (${tempFile.length()} بايت فقط).")
             }
 
@@ -283,6 +285,7 @@ class DownloadManager(
             Log.e("DownloadManager", "Task ${task.id} failed: ${e.message}", e)
             activeJobs.remove(task.id)
             val errorMsg = when {
+                e.message?.contains("403", true) == true -> "الخادم يطلب مصادقة (كود 403)"
                 e.message?.contains("HTML", true) == true -> "الرابط ليس ملف وسائط صالح (صفحة ويب)"
                 e.message?.contains("ftyp", true) == true -> "ملف الفيديو تالف أو غير صالح"
                 e.message?.contains("ID3", true) == true -> "ملف الصوت تالف أو غير صالح"
@@ -292,5 +295,35 @@ class DownloadManager(
             }
             repository.markFailed(task.id, DownloadStatus.FAILED.name, errorMsg)
         }
+    }
+
+    private fun executeHttpRequest(url: String, existingBytes: Long): Response {
+        val requestBuilder = Request.Builder()
+            .url(url)
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+            .header("Accept", "*/*")
+            .header("Accept-Encoding", "identity")
+            .header("Connection", "keep-alive")
+
+        if (existingBytes > 0L) {
+            requestBuilder.header("Range", "bytes=$existingBytes-")
+        }
+
+        return httpClient.newCall(requestBuilder.build()).execute()
+    }
+
+    private fun executeHttpRequestWithAndroidHeaders(url: String, existingBytes: Long): Response {
+        val requestBuilder = Request.Builder()
+            .url(url)
+            .header("User-Agent", "com.google.android.youtube/19.09.37 (Linux; U; Android 14)")
+            .header("Accept", "*/*")
+            .header("Accept-Encoding", "identity")
+            .header("Connection", "keep-alive")
+
+        if (existingBytes > 0L) {
+            requestBuilder.header("Range", "bytes=$existingBytes-")
+        }
+
+        return httpClient.newCall(requestBuilder.build()).execute()
     }
 }
